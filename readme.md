@@ -9,10 +9,12 @@
 * хранение данных в файловой системе;
 * SQL-подобный язык запросов;
 * работу с типами `int` и `string`;
-* создание и удаление баз данных и таблиц;
-* вставку, обновление, удаление и выборку данных;
+* DDL: создание и удаление баз данных и таблиц;
+* DML: вставку, обновление, удаление и выборку данных;
 * индексацию данных на основе B-Tree/B+Tree/B*Tree/B*+Tree;
 * оптимизацию запросов через индексы;
+* Условия выборки: ==, !=, <, >, <=, >=, BETWEEN, LIKE
+* Алиасы столбцов в SELECT ... AS
 * валидацию запросов и ограничений целостности;
 * вывод результатов выборки в формате JSON.
 
@@ -20,7 +22,7 @@
 
 # Структура проекта
 
-```text
+```
 CW_DB/
 │
 ├── CMakeLists.txt              # Конфигурация сборки проекта
@@ -73,7 +75,6 @@ CW_DB/
 │   │   └── PageManager.hpp
 │   │
 │   ├── index/                  # Индексные структуры
-│   │   ├── BTree.hpp
 │   │   ├── BTreeNode.hpp
 │   │   ├── BPlusTree.hpp
 │   │   └── IndexManager.hpp
@@ -119,7 +120,6 @@ CW_DB/
 │   │   └── PageManager.cpp
 │   │
 │   ├── index/
-│   │   ├── BTree.cpp
 │   │   ├── BTreeNode.cpp
 │   │   ├── BPlusTree.cpp
 │   │   └── IndexManager.cpp
@@ -354,20 +354,41 @@ DROP TABLE users;
 ## Работа с данными
 
 ```sql
-INSERT INTO users (id, name)
-VALUE (1, "Alex");
+INSERT INTO users (id, name) VALUE (1, "Alex");
+
+-- Пропущенные nullable-колонки инициализируются NULL
+INSERT INTO users (id, name) VALUE (2, "Bob");
+
+-- Несколько строк за один запрос
+INSERT INTO users (id, name) VALUE (3, "Carol"), (4, "Dave");
 
 SELECT * FROM users;
 
-UPDATE users
-SET name = "Bob"
-WHERE id == 1;
+-- Конкретные колонки с алиасами
+SELECT id, name AS username FROM users;
 
-DELETE FROM users
-WHERE id == 1;
+-- С условием
+SELECT * FROM users WHERE id == 1;
+
+-- Диапазон (включает левую границу, исключает правую: [2, 5))
+SELECT * FROM users WHERE id BETWEEN 2 AND 5;
+
+-- Регулярное выражение
+SELECT * FROM users WHERE name LIKE "A.*";
+
+-- Обращение через database_name.table_name (без USE)
+SELECT * FROM mydb.users WHERE id > 0;
+
+UPDATE users SET name = "Bob" WHERE id == 1;
+
+DELETE FROM users WHERE id == 1;
 ```
 
 ---
+
+# Участники
+Участник1 - Зона ответственности—Ядро, файловое хранение, B-Tree индексы, сериализация
+Участник2 - Парсер, лексер, Query Engine, условия WHERE, JSON-вывод
 
 # План разработки
 
@@ -403,7 +424,7 @@ WHERE id == 1;
 ## Этап 6
 
 * индексирование;
-* B-Tree/B+Tree.
+* B+Tree.
 
 ## Этап 7
 
