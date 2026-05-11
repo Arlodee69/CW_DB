@@ -2,70 +2,101 @@
 #include <iostream>
 #include <vector>
 #include <string>
+#include <thread>
+#include <chrono>
 
 using namespace cw_db;
 
-void print_row(const std::vector<CellValue>& row) {
-    std::cout << "[ ";
-    for (const auto& cell : row) {
-        if (std::holds_alternative<uint64_t>(cell)) {
-            std::cout << std::get<uint64_t>(cell) << " ";
-        } else if (std::holds_alternative<std::string>(cell)) {
-            std::cout << "'" << std::get<std::string>(cell) << "' ";
+// Вспомогательная функция для вывода строки
+void print_row(Table* table, uint64_t id) {
+    try {
+        auto row = table->select_record(id);
+        std::cout << "[ ";
+        for (const auto& cell : row) {
+            if (std::holds_alternative<uint64_t>(cell)) {
+                std::cout << std::get<uint64_t>(cell) << " ";
+            } else {
+                std::cout << "'" << std::get<std::string>(cell) << "' ";
+            }
         }
+        std::cout << "]\n";
+    } catch (...) {
+        std::cout << "[ Запись с ID=" << id << " не найдена или была откачена/удалена ]\n";
     }
-    std::cout << "]\n";
 }
 
 int main() {
     try {
-        std::cout << "=== Запуск Storage Engine ===\n";
-        
-        // 1. Создаем папку базы данных в текущей директории
+        std::cout << "=== Запуск полного тестирования Storage Engine ===\n\n";
+
+        // 1. Инициализация движка (создаст логгер и телеметрию автоматически)
         DatabaseEngine engine("./test_db");
 
-        // 2. Создаем схему для таблицы "users" (ID, Имя, Возраст)
-        std::vector<ColumnDef> user_schema = {
+        std::vector<ColumnDef> schema = {
             {"id", ColumnType::INT},
             {"name", ColumnType::STRING},
-            {"age", ColumnType::INT}
+            {"score", ColumnType::INT}
         };
 
-        // 3. Создаем таблицу (если ее еще нет). Индекс 0 — это "id" (Primary Key)
         try {
-            engine.create_table("users", user_schema, 0);
-        } catch (const std::exception& e) {
-            std::cout << "[Info] " << e.what() << " (Продолжаем работу)\n";
+            engine.create_table("players", schema, 0);
+        } catch (...) {
+            std::cout << "[Info] Таблица players уже существует, загружаем...\n";
         }
 
-        // 4. Получаем указатель на таблицу
-        Table* users = engine.get_table("users");
+        Table* players = engine.get_table("players");
 
-        // 5. Вставляем тестовые данные (Парсер будет собирать этот вектор из SQL-запроса)
-        std::cout << "\n--- Вставка данных ---\n";
-        std::vector<CellValue> row1 = { 1ULL, std::string("Александр"), 25ULL };
-        std::vector<CellValue> row2 = { 2ULL, std::string("Елена"), 22ULL };
-        std::vector<CellValue> row3 = { 3ULL, std::string("Александр"), 30ULL }; // Дубликат имени для теста пула
+        // 2. Вставка начальных данных
+        std::cout << "--- 1. Базовая вставка ---\n";
+        players->insert_record({1ULL, std::string("Алиса"), 100ULL});
+        players->insert_record({2ULL, std::string("Боб"), 200ULL});
+        print_row(players, 1);
+        print_row(players, 2);
 
-        users->insert_record(row1);
-        users->insert_record(row2);
-        users->insert_record(row3);
-        std::cout << "3 записи успешно вставлены!\n";
-
-        // 6. Ищем данные через B+-дерево
-        std::cout << "\n--- Поиск данных (SELECT) ---\n";
+        // 3. Тест логгера и телеметрии (Эмулируем работу напарника-парсера)
+        std::cout << "\n--- 2. Тестирование Телеметрии и Логов ---\n";
         
-        std::cout << "Поиск ID = 2: ";
-        auto result2 = users->select_record(2);
-        print_row(result2);
+        // Успешный запрос (занял 15 мс)
+        engine.get_logger()->log_request("client_A", "thread_1", "INSERT ...", 1000, 1015, 200);
+        engine.get_telemetry()->record_request(15, false);
 
-        std::cout << "Поиск ID = 1: ";
-        auto result1 = users->select_record(1);
-        print_row(result1);
+        // Ошибочный запрос (занял 2 мс)
+        engine.get_logger()->log_request("client_B", "thread_2", "BAD SQL", 1020, 1022, 500);
+        engine.get_telemetry()->record_request(2, true);
 
-        // 7. Сохраняем все на диск
+        std::cout << "Текущая статистика (JSON):\n" 
+                  << engine.get_telemetry()->get_metrics_json() << "\n";
+
+        // 4. Тест Машины Времени (REVERT)
+        std::cout << "\n--- 3. Тестирование Машины времени (REVERT) ---\n";
+        
+        // Ждем ровно 1 секунду, чтобы отделить старые события от новых
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        
+        // ЗАПОМИНАЕМ ВРЕМЯ (Создаем точку сохранения)
+        uint64_t savepoint_time = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::system_clock::now().time_since_epoch()
+        ).count();
+        std::cout << "[!] Точка сохранения создана.\n";
+
+        std::cout << "Злоумышленник ломает базу (меняет очки Алисе и добавляет читера)...\n";
+        players->insert_record({3ULL, std::string("Читер"), 9999ULL}); // INSERT
+        players->insert_record({1ULL, std::string("Алиса"), 5000ULL}); // UPDATE (Ключ 1 уже есть)
+
+        std::cout << "Испорченные данные:\n";
+        print_row(players, 1);
+        print_row(players, 3);
+
+        std::cout << "\n[!] АКТИВАЦИЯ REVERT: Откат к точке сохранения!\n";
+        players->revert_to(savepoint_time);
+
+        std::cout << "Данные после отката:\n";
+        print_row(players, 1); // Должно вернуться к 100
+        print_row(players, 3); // Должен исчезнуть
+
+        // 5. Завершение
         engine.sync_all();
-        std::cout << "\n=== Работа завершена ===\n";
+        std::cout << "\n=== Все тесты успешно завершены ===\n";
 
     } catch (const std::exception& e) {
         std::cerr << "\n[КРИТИЧЕСКАЯ ОШИБКА]: " << e.what() << "\n";

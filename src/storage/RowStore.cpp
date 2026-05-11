@@ -1,60 +1,38 @@
 #include "storage/RowStore.hpp"
 #include <cstring>
-#include <stdexcept>
 
 namespace cw_db {
 
-    RowStore::RowStore(std::unique_ptr<FileManager> fm) 
-        : file_manager(std::move(fm)) 
-    {
-        // При запуске базы сразу ставим курсор в конец файла, 
-        // чтобы не перезаписать старые данные
+    RowStore::RowStore(std::unique_ptr<FileManager> fm) : file_manager(std::move(fm)) {
         current_eof = file_manager->get_size();
     }
 
     uint64_t RowStore::append_row(const Row& row) {
-        // 1. Считаем размер. Каждая колонка весит ровно 8 байт.
-        size_t row_size = row.values.size() * sizeof(uint64_t);
-
-        // 2. Растягиваем файл, если места не хватает
+        size_t row_size = row.cells.size() * sizeof(uint64_t);
+        
+        // Если файл заполнился, увеличиваем его размер
         if (current_eof + row_size > file_manager->get_size()) {
-            // Увеличиваем блоками по 4096 байт
             file_manager->grow_file(file_manager->get_size() + 4096);
         }
 
-        // 3. Вычисляем физический адрес в оперативной памяти (mmap)
+        // Копируем данные из вектора прямо в память файла
         char* write_ptr = static_cast<char*>(file_manager->get_data()) + current_eof;
+        std::memcpy(write_ptr, row.cells.data(), row_size);
 
-        // 4. Копируем массив значений (std::vector) прямо в память файла
-        // row.values.data() дает сырой указатель на элементы вектора
-        std::memcpy(write_ptr, row.values.data(), row_size);
-
-        // 5. Запоминаем текущее смещение, чтобы вернуть его
-        uint64_t inserted_offset = current_eof;
-
-        // 6. Сдвигаем курсор конца файла
+        uint64_t written_offset = current_eof;
         current_eof += row_size;
 
-        return inserted_offset;
+        return written_offset;
     }
 
-    Row RowStore::get_row(uint64_t offset, size_t num_columns) {
-        // Проверка на выход за пределы файла
-        size_t row_size = num_columns * sizeof(uint64_t);
-        if (offset + row_size > file_manager->get_size()) {
-            throw std::out_of_range("Row offset is out of bounds");
-        }
-
-        // Вычисляем адрес чтения
-        char* read_ptr = static_cast<char*>(file_manager->get_data()) + offset;
-
-        // Создаем пустую строку с нужным количеством колонок
+    Row RowStore::read_row(uint64_t offset, size_t num_columns) {
         Row row;
-        row.values.resize(num_columns);
-
-        // Копируем байты из файла в наш объект Row
-        std::memcpy(row.values.data(), read_ptr, row_size);
-
+        row.cells.resize(num_columns);
+        
+        // Читаем сырые байты из mmap обратно в вектор
+        char* read_ptr = static_cast<char*>(file_manager->get_data()) + offset;
+        std::memcpy(row.cells.data(), read_ptr, num_columns * sizeof(uint64_t));
+        
         return row;
     }
 

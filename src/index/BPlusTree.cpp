@@ -285,4 +285,34 @@ namespace cw_db {
         }
     }
 
+    bool BPlusTree::update_value(KeyType key, ValueType new_value) {
+        // 1. Находим нужный лист
+        uint32_t leaf_id = find_leaf_page(key);
+        void* raw_page = page_manager->get_page_raw(leaf_id);
+        
+        NodeHeader* header = reinterpret_cast<NodeHeader*>(raw_page);
+        // Получаем доступ к массиву записей в листе
+        auto* records = reinterpret_cast<LeafRecord*>(
+            static_cast<char*>(raw_page) + sizeof(NodeHeader)
+        );
+
+        // 2. Бинарный поиск нужного ключа
+        int left = 0, right = header->num_keys - 1;
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            if (records[mid].key == key) {
+                // Нашли! Перезаписываем старое смещение на новое (или на TOMBSTONE)
+                records[mid].value = new_value; 
+                return true;
+            } else if (records[mid].key < key) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+        
+        // Ключ не найден
+        return false; 
+    }
+
 } // namespace cw_db

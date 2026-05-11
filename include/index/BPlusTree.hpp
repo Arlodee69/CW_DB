@@ -2,13 +2,17 @@
 
 #include "storage/PageManager.hpp"
 #include "index/BTreeNode.hpp"
+#include <limits>
 
 namespace cw_db {
+
+    constexpr uint64_t TOMBSTONE = std::numeric_limits<uint64_t>::max();
 
     class BPlusTree {
     private:
         PageManager* page_manager;
         uint32_t root_page_id;
+        
 
         // Внутренние механизмы навигации и вставки
         uint32_t find_leaf_page(KeyType key);
@@ -23,7 +27,7 @@ namespace cw_db {
 
     public:
         BPlusTree(PageManager* pm, uint32_t root_id);
-
+        bool update_value(KeyType key, ValueType new_value);
         bool search(KeyType key, ValueType& out_value);
         void insert(KeyType key, ValueType value);
         void remove(KeyType key); // Базовое удаление
