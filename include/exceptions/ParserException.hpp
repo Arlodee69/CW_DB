@@ -10,4 +10,4 @@ public:
         : std::runtime_error(message) {}
 };
 
-} // namespace cw_db
+}
