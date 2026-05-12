@@ -91,10 +91,12 @@ void Parser::throwErrorAt(const Token& token, const std::string& message) const 
 // =================================================================
 NodePtr Parser::parseStatement() {
     switch (current().type) {
+        // dml
         case TokenType::KW_SELECT: return parseSelect();
         case TokenType::KW_INSERT: return parseInsert();
         case TokenType::KW_UPDATE: return parseUpdate();
         case TokenType::KW_DELETE: return parseDelete();
+        // ddl
         case TokenType::KW_CREATE: return parseCreate();
         case TokenType::KW_DROP:   return parseDrop();
         case TokenType::KW_USE:    return parseUse();
